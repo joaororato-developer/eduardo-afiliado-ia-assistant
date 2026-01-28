@@ -12,7 +12,7 @@ const waitLogin = async () => {
 	await page.waitForTimeout(500)
 	await page
 		.getByTestId('user_id')
-		.pressSequentially('admpromoestilo1@gmail.com', { delay: 100 })
+		.pressSequentially(process.env.ML_EMAIL as string, { delay: 100 })
 	await page.locator('#_R_ijkr2e_').click()
 
 	await page.waitForTimeout(60000)
