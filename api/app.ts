@@ -63,7 +63,7 @@ export const getItemLinkCoupon = async (itemUrl: string) => {
 
 	const couponFrame = page.frameLocator('iframe[title="Ver cupons disponíveis"]');
 
-	const firstCouponItem = couponFrame.locator('.input-code-coupon').first();
+	const firstCouponItem = couponFrame.locator('div.coupons-list-container > div > div > div > div > div.top-container > div.left-side-container > div.icon-title-container > span').first();
 
 	let coupon: string | null = null;
 
@@ -71,6 +71,11 @@ export const getItemLinkCoupon = async (itemUrl: string) => {
 		await firstCouponItem.waitFor({ state: 'visible', timeout: 8000 });
 
 		coupon = await firstCouponItem.innerText();
+
+		if (coupon.includes('OFF')) {
+			[, coupon] = coupon.split('OFF ')
+			coupon = coupon?.split(' ').join('')
+		}
 
 		return {
 			coupon,
@@ -160,6 +165,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 				});
 
 				const generatedLinksByOpenAI = JSON.parse(completion.choices[0].message?.content || '{}').links
+				let outputMessage = ''
 
 				for (const link of generatedLinksByOpenAI) {
 					try {
