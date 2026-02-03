@@ -25,35 +25,48 @@ const waitLogin = async () => {
 		.pressSequentially(process.env.ML_EMAIL as string, { delay: 100 })
 	await page.locator('#_R_ijkr2e_').click()
 
-	await page.waitForTimeout(60000)
+	await page.waitForTimeout(120000)
 
 	await browserContext.storageState({ path: 'auth.json' })
 }
 
-export const getItemLinkCoupon = async (itemUrl: string) => {
+export const getItemLink = async (itemUrl: string) => {
 	const context = browserContext as BrowserContext
 	const page = await context.newPage()
 
-	await page.goto(itemUrl)
-	const actionLink = page.locator(
-		'.poly-component__link.poly-component__link--action-link',
-	)
-	await actionLink.waitFor({ state: 'visible', timeout: 8000 })
-	await actionLink.click()
+	try {
+		await page.goto(itemUrl)
+		const actionLink = page.locator(
+			'.poly-component__link.poly-component__link--action-link',
+		)
+		await actionLink.waitFor({ state: 'visible', timeout: 8000 })
+		await actionLink.click()
+	
+		// Pegar link
+		let itemLink: string | null;
+	
+		const shareLinkButton = page.getByTestId('generate_link_button').filter({ hasText: 'Compartilhar' })
+		await shareLinkButton.waitFor({ state: 'visible', timeout: 8000 })
+		await shareLinkButton.click()
+		const linkInput = page.getByTestId('text-field__label_link')
+		await linkInput.waitFor({ state: 'visible', timeout: 8000 })
+	
+		itemLink = await linkInput.inputValue()
+	
+		return itemLink
+	} catch (error) {
+		await page.screenshot({ path: 'erro_iframe.png' });
 
-	// Pegar link
-	let itemLink: string | null;
+		return {
+			error: `Produto ${itemUrl} não foi encontrado, verifique se o produto ainda existe.`
+		}
+	}
+}
 
-	const shareLinkButton = page.getByTestId('generate_link_button').filter({ hasText: 'Compartilhar' })
-	await shareLinkButton.waitFor({ state: 'visible', timeout: 8000 })
-	await shareLinkButton.click()
-	const linkInput = page.getByTestId('text-field__label_link')
-	await linkInput.waitFor({ state: 'visible', timeout: 8000 })
+export const getItemCoupoun = async (itemUrl: string) => {
+	const context = browserContext as BrowserContext
+	const page = await context.newPage()
 
-	itemLink = await linkInput.inputValue()
-
-
-	// Pegar cupom
 	const couponsLink = page.getByTestId('action-modal-link')
 		.filter({ hasText: 'Ver cupons disponíveis' })
 	couponsLink.waitFor({ state: 'visible', timeout: 8000 })
@@ -77,12 +90,13 @@ export const getItemLinkCoupon = async (itemUrl: string) => {
 			coupon = coupon?.split(' ').join('')
 		}
 
-		return {
-			coupon,
-			itemLink
-		}
+		return coupon
 	} catch (error) {
 		await page.screenshot({ path: 'erro_iframe.png' });
+
+		return {
+			error: `Produto ${itemUrl} não possui cupom cadastrado no momento.`
+		}
 	}
 }
 
@@ -91,18 +105,36 @@ const getSystemMessagePromptLinkExtractor = (mercadoLivreDomain: string) => `
 	Você é um extrator de dados.
 	Sua tarefa é identificar e extrair links de produtos do Mercado Livre presentes no texto fornecido.
 
-	Regras:
+	Regras para links:
 	- Considere apenas links do domínio ${mercadoLivreDomain}
 	- Ignore links de outros domínios
 	- Se não houver link válido, retorne um array vazio
+	- Nunca invente links
+	- Extraia a URL exatamente como aparece no texto (QUALQUER ERRO SERÁ CONSIDERADO FALHA CRÍTICA)
+
+	Extraia também um booleano chamado "discountOnTheAd".
+
+	Regras para "discountOnTheAd":
+	- Deve ser true SOMENTE se o texto indicar explicitamente que o cupom ou desconto é aplicado no anúncio
+	- Exemplos válidos:
+	- "cupom no anúncio"
+	- "aplique o cupom no anúncio"
+	- "desconto no anúncio"
+	- NÃO utilize preço ("de X por Y") como critério
+	- NÃO assuma desconto baseado apenas em menção de cupom
+	- Se o desconto depender de cupom do Mercado Livre, for ambíguo ou não for mencionado, retorne false
+	- Em caso de dúvida, retorne false
+
+	Regras de resposta:
 	- Responda exclusivamente em JSON
 	- Não inclua explicações, comentários ou texto adicional
-	- Nunca invente links
-	- Extraia a url exata (QUALQUER ERRO AQUI SERÁ CONSIDERADO COMO FALHA CRÍTICA)
+	- Sempre retorne todos os campos definidos
 
 	Formato de resposta:
 	{
-	"links": string[]
+	"links": string[],
+	"discountOnTheAd": boolean
+	}
 `
 
 const getUserMessagePromptLinkExtractor = (messageBody: string) => `
@@ -155,7 +187,7 @@ FUNÇÃO: Você é um formatador de mensagens para grupos de promoções no What
 	· EXEMPLO: Entrada Tênis Nike Air Max 👟🔥 → Saída: Tênis Nike Air Max
 	· NUNCA: Inclua emojis nesta linha.
 
-**PREÇO (FORMATO RÍGIDO)**
+	**PREÇO (FORMATO RÍGIDO)**
 	· PASSO A PASSO:
 	  1. IDENTIFIQUE OS VALORES: Procure por R$ no texto. Encontre o preço promocional (geralmente após "Por", "por", "por") e o preço cheio (geralmente após "De", "de").
 	  2. TRATE OS VALORES:
@@ -171,7 +203,7 @@ FUNÇÃO: Você é um formatador de mensagens para grupos de promoções no What
 	· NUNCA: Invente um preço cheio se ele não for fornecido. Use o Formato C.
 	· QUEBRA DE LINHA NO WHATSAPP: Após os emojis de fogo (🔥🔥), adicione EXATAMENTE 5 (CINCO) ESPAÇOS para forçar a quebra. Exemplo: De R$100 por R$80🔥🔥     
 
-**CUPOM (SOMENTE SE EXISTIR)**
+	**CUPOM (SOMENTE SE EXISTIR)**
 	· PASSO A PASSO:
 	  1. VERIFIQUE A EXISTÊNCIA: Procure as palavras-chave: Cupom:, Use o cupom, aplique o cupom, Cupom de X% OFF.
 	  2. IDENTIFIQUE O TIPO:
@@ -184,14 +216,14 @@ FUNÇÃO: Você é um formatador de mensagens para grupos de promoções no What
 	       · O nome do cupom fica entre dois asteriscos (**).
 	· SE NÃO HOUVER CUPOM: NÃO CRIE a linha de cupom. Pule para a próxima regra.
 
-**LOJA OFICIAL (SOMENTE SE EXISTIR)**
+	**LOJA OFICIAL (SOMENTE SE EXISTIR)**
 	· CONDIÇÃO ÚNICA: Só inclua esta linha se o texto original contiver a frase exata "loja oficial".
 	· COMO FORMATAR: Vendido pela loja oficial da [Marca] no ML
 	  · Extraia o nome da Marca do contexto (ex: "loja oficial Nike no ML" → Marca = "Nike").
 	· EXCEÇÃO: Se a frase for "loja oficial no ML" sem marca, formate como: Vendido pela loja oficial no ML
 	· SE A FRASE NÃO ESTIVER LÁ: NÃO INVENTE. Pule esta linha.
 
-**INFORMAÇÕES COMPLEMENTARES (SOMENTE SE EXISTIREM)**
+	**INFORMAÇÕES COMPLEMENTARES (SOMENTE SE EXISTIREM)**
 	· O QUE INCLUIR AQUI: Instruções como:
 	  · "Selecione o vendedor: X"
 	  · "Vendido por: Y"
@@ -201,12 +233,12 @@ FUNÇÃO: Você é um formatador de mensagens para grupos de promoções no What
 	  · Exemplo: Selecione o vendedor: Loja Do Zé
 	· SE NÃO HOUVER: NÃO CRIE.
 
-**[LINK DO PRODUTO]**
+	**[LINK DO PRODUTO]**
 	· O QUE FAZER: 
 	· COMO FORMATAR: Coloque na ÚLTIMA LINHA, sem emojis, sem texto anterior.
 	· SE NÃO HOUVER: Omita.
 
-**EMOJIS (LISTA BRANCA)**
+	**EMOJIS (LISTA BRANCA)**
 	· EMOJIS PERMITIDOS (USE APENAS ESTES):
 	  · 🔥🔥 (SOMENTE na linha de preço, após o valor).
 	  · 🎟️ (SOMENTE na linha de cupom).
@@ -343,7 +375,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 					response_format: {
 						type: "json_schema",
 						json_schema: {
-							name: "ml_links",
+							name: "ml_extractor",
 							schema: {
 								type: "object",
 								properties: {
@@ -353,32 +385,56 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 											type: "string",
 											description: "URL do produto no Mercado Livre"
 										}
+									}, 
+									discountOnTheAd: {
+										type: "boolean",
+										description: "Indica se o texto menciona explicitamente que o cupom ou desconto é aplicado diretamente no anúncio (ex: 'cupom no anúncio'). Não inferir com base em preço, percentual ou menção genérica de cupom."
 									}
 								},
-								required: ["links"],
+								required: ["links", "discountOnTheAd"],
 								additionalProperties: false
 							}
 						}
 					}
 				});
 
-				const generatedLinksByOpenAI = JSON.parse(completion.choices[0].message?.content || '{}').links
+				const completionExtractorContent = JSON.parse(completion.choices[0].message?.content || '{}')
+				const generatedLinksByOpenAI = completionExtractorContent.links
+				const isDiscountOnTheAd = completionExtractorContent.discountOnTheAd || false
 				let outputMessage = ''
 
 				for (const link of generatedLinksByOpenAI) {
 					try {
-						const itemData = await getItemLinkCoupon(link)
+						const itemLink = await getItemLink(link)
+						const coupoun = await getItemCoupoun(link)
 
-						if (!itemData) continue
+						if (typeof itemLink === 'object' && ('error' in itemLink)) {
+							outputMessage += `\n ${itemLink.error}`
+						}
 
-						const { coupon, itemLink } = itemData
+						if (!isDiscountOnTheAd && typeof coupoun === 'object' && ('error' in coupoun)) {
+							outputMessage += `\n ${coupoun.error}`
+						}
+
+						if (outputMessage) {
+							outputMessage =
+								`
+								Erros encontrados ao tentar buscar os dados do produto:
+									${outputMessage}
+								---	
+								`
+						}
+
+						if (typeof itemLink !== 'string') {
+							return outputMessage
+						}
 
 						const completion = await openai.chat.completions.create({
 							model: "gpt-4o-mini",
 							messages: [
 								{ role: "system", content: getSystemMessagePromptMessageFormatter() },
 								{ role: "user", content: getUserMessagePromptMessageFormatter({
-									itemCoupon: coupon, 
+									itemCoupon: typeof coupoun == 'string' ? coupoun : "", 
 									itemLink,
 									itemSummary: messageBody
 								})}
