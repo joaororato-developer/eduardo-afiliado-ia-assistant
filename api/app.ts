@@ -67,20 +67,20 @@ export const getItemCoupoun = async (itemUrl: string) => {
 	const context = browserContext as BrowserContext
 	const page = await context.newPage()
 
-	const couponsLink = page.getByTestId('action-modal-link')
-		.filter({ hasText: 'Ver cupons disponíveis' })
-	couponsLink.waitFor({ state: 'visible', timeout: 8000 })
-
-	couponsLink && await couponsLink.click()
-	await page.waitForTimeout(500)
-
-	const couponFrame = page.frameLocator('iframe[title="Ver cupons disponíveis"]');
-
-	const firstCouponItem = couponFrame.locator('div.coupons-list-container > div > div > div > div > div.top-container > div.left-side-container > div.icon-title-container > span').first();
-
-	let coupon: string | null = null;
-
 	try {
+		const couponsLink = page.getByTestId('action-modal-link')
+			.filter({ hasText: 'Ver cupons disponíveis' })
+		await couponsLink.waitFor({ state: 'visible', timeout: 8000 })
+
+		couponsLink && await couponsLink.click()
+		await page.waitForTimeout(500)
+
+		const couponFrame = page.frameLocator('iframe[title="Ver cupons disponíveis"]');
+
+		const firstCouponItem = couponFrame.locator('div.coupons-list-container > div > div > div > div > div.top-container > div.left-side-container > div.icon-title-container > span').first();
+
+		let coupon: string | null = null;
+
 		await firstCouponItem.waitFor({ state: 'visible', timeout: 8000 });
 
 		coupon = await firstCouponItem.innerText();
@@ -120,7 +120,7 @@ const getSystemMessagePromptLinkExtractor = (mercadoLivreDomain: string) => `
 	- "cupom no anúncio"
 	- "aplique o cupom no anúncio"
 	- "desconto no anúncio"
-	- NÃO utilize preço ("de X por Y") como critério
+	- Utilize preço ("de X por Y") como critério apenas se não existir NENHUM CUPOM na descrição.
 	- NÃO assuma desconto baseado apenas em menção de cupom
 	- Se o desconto depender de cupom do Mercado Livre, for ambíguo ou não for mencionado, retorne false
 	- Em caso de dúvida, retorne false
@@ -340,6 +340,27 @@ const getUserMessagePromptMessageFormatter = ({
 	${itemSummary}
 `
 
+const sendToEvolution = async (body: string, url: string, remoteJid: string, mediaType: string) => {
+	if (!body) return
+	try {
+		await fetch(`http://localhost:9000/message/sendMedia/${process.env.EVOLUTION_INSTANCE_NAME}`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'apikey': process.env.EVOLUTION_API_KEY || ''
+			},
+			body: JSON.stringify({
+				number: remoteJid,
+				mediatype: mediaType,
+				media: url,
+				caption: body
+			})
+		})
+	} catch (error) {
+		console.error('Erro ao enviar mensagem para Evolution API:', error)
+	}
+}
+
 app.post('/receive-whatsapp', (req: Request, res: Response) => {
 	setImmediate(async () => {
 		const { data } = req.body
@@ -362,8 +383,10 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
 		const messageTypeFunctionsMap: { [key: string]: () => Promise<any> } = {
 			imageMessage: async () => {
+				console.log('imageMessageRecebida')
 				messageBody = message.imageMessage.caption
-				const { url: imageUrl } = message
+				const { url: imageUrl, mimetype } = message.imageMessage
+				const mediaType = mimetype.split('/')[0]
 
 				const completion = await openai.chat.completions.create({
 					model: "gpt-4o-mini",
@@ -426,7 +449,8 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 						}
 
 						if (typeof itemLink !== 'string') {
-							return outputMessage
+							await sendToEvolution(outputMessage, imageUrl, remoteJidMessage, "image")
+							continue
 						}
 
 						const completion = await openai.chat.completions.create({
@@ -440,10 +464,14 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 								})}
 							]
 						});
+
+						outputMessage += `\n ${completion.choices[0].message.content}`;
 					} catch (error) {
 						console.log(error)
 					}
 				}
+
+				await sendToEvolution(outputMessage, imageUrl, remoteJidMessage, "image")
 			}
 		}
 

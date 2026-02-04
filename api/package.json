@@ -10,6 +10,7 @@
 		"start": "pm2 start dist/app.js --name 'minha-api'"
 	},
 	"dependencies": {
+		"@types/axios": "^0.9.36",
 		"dotenv": "^17.2.3",
 		"express": "^4.18.2",
 		"openai": "^6.16.0",
