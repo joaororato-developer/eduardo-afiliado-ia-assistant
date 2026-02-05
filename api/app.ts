@@ -1,5 +1,6 @@
 import { config } from "dotenv"
 config()
+import { google } from 'googleapis';
 import express, { Request, Response } from 'express';
 import { Browser, BrowserContext, chromium } from "playwright"
 import { openai } from './open_ai';
@@ -9,26 +10,170 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-const browserInstance = chromium.launch({ headless: false }) // Abre o navegador visível
+const userDataDir = "C:/chrome-profiles/ml-automation";
+
+const browserInstance = chromium.launchPersistentContext(
+	userDataDir,
+	{
+	  channel: "chrome",
+	  headless: false,
+	  args: [
+		"--disable-blink-features=AutomationControlled"
+	  ]
+	}
+  );
 
 export let browserContext: BrowserContext | null = null
 
-const waitLogin = async () => {
-	const browser = await browserInstance
-	browserContext = await browser.newContext() as BrowserContext
-	const page = await browserContext.newPage()
-
-	await page.goto('https://www.mercadolivre.com/jms/mlb/lgz/msl/login/')
-	await page.waitForTimeout(500)
-	await page
-		.getByTestId('user_id')
-		.pressSequentially(process.env.ML_EMAIL as string, { delay: 100 })
-	await page.locator('#_R_ijkr2e_').click()
-
-	await page.waitForTimeout(120000)
-
-	await browserContext.storageState({ path: 'auth.json' })
+function decodeBase64(data: string) {
+	return Buffer
+	  .from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+	  .toString('utf-8');
 }
+
+const waitLogin = async () => {
+	browserContext = await browserInstance;
+	const page = await browserContext.newPage();
+
+	// 0️⃣ Login no Google (Gmail)
+	await page.goto('https://accounts.google.com/', {
+		waitUntil: 'domcontentloaded',
+	});
+  
+	// Email
+	const googleEmail = page.locator('input[type="email"]');
+	await googleEmail.waitFor({ timeout: 15000 });
+	
+	await googleEmail.type(process.env.ML_EMAIL as string, {
+		delay: 80, // 👈 digitação humana
+	});
+	
+	await page.waitForTimeout(500);
+	await page.keyboard.press('Enter');
+	
+	// Senha
+	const googlePassword = page.locator('input[type="password"]');
+	await googlePassword.waitFor({ timeout: 15000 });
+	
+	await googlePassword.type(process.env.ML_PASSWORD as string, {
+		delay: 90, // 👈 ligeiramente diferente do email
+	});
+	
+	await page.waitForTimeout(600);
+	await page.keyboard.press('Enter');
+	
+	// Aguarda login completar
+	await page.waitForURL(/myaccount\.google\.com|mail\.google\.com/, {
+		timeout: 30000,
+	});
+	
+	console.log('✅ Login no Google realizado');
+
+	// 1️⃣ Agora sim, abre o Mercado Livre
+	await page.goto('https://www.mercadolivre.com/jms/mlb/lgz/msl/login/', {
+	waitUntil: 'domcontentloaded',
+	});
+
+	// 5️⃣ Clica para enviar código por e-mail
+	await page.locator('#code_validation button').click();
+
+	const emailSentAt = new Date();
+	console.log('📧 Código solicitado por e-mail em:', emailSentAt.toISOString());
+
+	// 6️⃣ Aguarda 30 segundos
+	await new Promise(resolve => setTimeout(resolve, 30_000));
+
+	// 7️⃣ Configura OAuth Gmail
+	const oauth2Client = new google.auth.OAuth2(
+		process.env.GMAIL_OAUTH_CLIENT_ID,
+		process.env.GMAIL_OAUTH_SECRET_KEY
+	);
+
+	oauth2Client.setCredentials({
+		refresh_token: process.env.GMAIL_OAUTH_REFRESH_TOKEN
+	});
+
+	const gmail = google.gmail({
+		version: 'v1',
+		auth: oauth2Client
+	});
+
+	// 8️⃣ Busca e-mails do Mercado Livre com "código" no assunto,
+	// recebidos APÓS o clique
+	const afterUnix = Math.floor(emailSentAt.getTime() / 1000);
+
+	const response = await gmail.users.messages.list({
+		userId: 'me',
+		q: `from:mercadolivre subject:código after:${afterUnix}`,
+		maxResults: 5
+	});
+
+	const mails = response.data.messages || [];
+
+	for (const mail of mails) {
+		const { id: messageId } = mail;
+		if (!messageId) continue;
+	  
+		const message = await gmail.users.messages.get({
+		  userId: 'me',
+		  id: messageId,
+		  format: 'full',
+		});
+	  
+		const payload = message.data.payload;
+		if (!payload) continue;
+	  
+		let html = '';
+	  
+		// 1️⃣ Se for multipart
+		if (payload.parts) {
+		  const htmlPart = payload.parts.find(
+			p => p.mimeType === 'text/html'
+		  );
+	  
+		  if (htmlPart?.body?.data) {
+			html = Buffer.from(
+			  htmlPart.body.data.replace(/-/g, '+').replace(/_/g, '/'),
+			  'base64'
+			).toString('utf-8');
+		  }
+		}
+	  
+		// 2️⃣ Se for single-part
+		else if (payload.mimeType === 'text/html' && payload.body?.data) {
+		  html = Buffer.from(
+			payload.body.data.replace(/-/g, '+').replace(/_/g, '/'),
+			'base64'
+		  ).toString('utf-8');
+		}
+	  
+		if (!html) continue;
+	  
+		// 3️⃣ Extrair código
+		const match = html.match(/\b\d{6}\b/);
+		const code = match?.[0];
+	  
+		if (code) {
+		  console.log('Código encontrado:', code);
+		  break;
+		}
+	  }
+
+
+	if (mails.length === 0) {
+		console.log('❌ Nenhum e-mail de código encontrado ainda');
+	} else {
+		console.log(`✅ ${mails.length} e-mail(s) de código encontrados`);
+	}
+
+	// 9️⃣ Aguarda login manual ou próxima automação
+	await page.waitForTimeout(120000);
+
+	// 🔟 Salva sessão
+	await browserContext.storageState({ path: 'auth.json' });
+	console.log('✅ Sessão salva em auth.json');
+};
+  
 
 export const getItemLink = async (itemUrl: string) => {
 	const context = browserContext as BrowserContext
