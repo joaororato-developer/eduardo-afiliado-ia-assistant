@@ -3,14 +3,17 @@ config()
 import { google } from 'googleapis';
 import express, { Request, Response } from 'express';
 import { Browser, BrowserContext, chromium, Page } from "playwright"
-import { openai } from './open_ai';
+import { genAI } from './gemini'; // Importa a instância do GoogleGenerativeAI
 import { loginMercadoLivre } from "./mercadolivreAuth";
 import { loginGoogle } from "./googleAuth";
 import { getSystemMessagePromptLinkExtractor, getUserMessagePromptLinkExtractor } from "./linkExtractor";
-import { getItemCoupoun, getItemLink, getItemPrice, getItemDiscountText } from "./ml-helper";
+import { getItemCoupoun, getItemLink, getItemPrice, getItemDiscountText, getItemOldPrice, getItemPaymentMethod, getItemTitle, getFreeShippingFull, getStoreVerified } from "./ml-helper";
 import { getSystemMessagePromptMessageFormatter, getUserMessagePromptMessageFormatter } from "./messageFormatter";
-import { downloadContentFromMessage, proto } from '@whiskeysockets/baileys'
+import { proto } from '@whiskeysockets/baileys'
 import { getSystemMessagePromptDiscountExtractor, getUserMessagePromptDiscountExtractor } from "./discountExtractor";
+import { getSystemMessagePromptMessageModifier, getUserMessagePromptMessageModifier } from "./messageModifier";
+import { getRandomDelay } from "./utils";
+import { sendFlowApi } from "./sendflow";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -43,14 +46,30 @@ const waitLogin = async () => {
 };
 
 
+const confirmationMessage = `\n\n---/---
+Enviar para as campanhas ou realizar alguma alteração?`
+
+const normalizeText = (text: string) => {
+    return text.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+const isConfirmationMessage = (text: string) => {
+    if (!text) return false;
+    const normalizedText = normalizeText(text);
+    const confirmationKeywords = [
+        "ok", "pode enviar", "envia", "enviar", "certo", "👍", "perfeito", "show", "aprovado", "envio aprovado",
+        "sim", "pode", "manda", "manda ver", "dale", "beleza", "blz", "confirmado", "confere", "isso", "isso ai", 
+        "isso mesmo", "correto", "exato", "ta ok", "tá ok", "okay", "okk", "ook", "fechado", "top"
+    ];
+    return confirmationKeywords.includes(normalizedText);
+}
+
 async function getImageBase64FromEvolution(messageKey: proto.IMessageKey) {
     const baseUrl = (process.env.EVOLUTION_URL || 'http://localhost:9000').replace(/\/$/, '');
     const url = `${baseUrl}/chat/getBase64FromMediaMessage/${process.env.EVOLUTION_INSTANCE_NAME}`;
 
     for (let i = 0; i < 3; i++) {
         try {
-            console.log(`Tentativa ${i + 1} de recuperar base64...`);
-            
             await new Promise(resolve => setTimeout(resolve, 1500));
 
             const response = await fetch(url, {
@@ -126,14 +145,17 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
         if (!key || key.fromMe) return
 
         const { remoteJid: remoteJidMessage, id: messageId } = key
-        // Extraindo message diretamente do data para garantir que temos o objeto completo
         const { message } = data 
-        const { messageType } = data
+        let { messageType } = data
         const remoteJidGroupAllowed = process.env.AUTOMATION_GROUP
 
         if (remoteJidGroupAllowed !== remoteJidMessage) return
 
         let messageBody = ''
+
+        if (data.contextInfo?.quotedMessage) {
+            messageType = `${messageType}ReplyMessage`
+        }
 
         if (!messageType) return
 
@@ -141,71 +163,58 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
         const messageTypeFunctionsMap: { [key: string]: () => Promise<any> } = {
             imageMessage: async () => {
-                console.log('imageMessageRecebida')
                 messageBody = message.imageMessage.caption
-                const { url: imageUrl, mimetype, jpegThumbnail } = message.imageMessage
+                const { url: imageUrl, mimetype } = message.imageMessage
                 const mediaType = mimetype.split('/')[0]
 
                 let mediaToSend = '';
                 try {
-                    console.log('Baixando mídia via Evolution API...');
                     mediaToSend = await getImageBase64FromEvolution(key);
                 } catch (err) {
                     console.error('Falha ao baixar da Evolution:', err);
                 }
 
                 if (!mediaToSend) {
-                    console.log("Abortando: Imagem não pôde ser baixada.");
                     return;
                 }
 
-                const completion = await openai.chat.completions.create({
-                    model: "gpt-4o-mini",
-                    messages: [
-                        { role: "system", content: systemMessagePromptLinkExtractor },
-                        { role: "user", content: getUserMessagePromptLinkExtractor(messageBody) }
-                    ],
-                    max_tokens: 500,
-                    response_format: {
-                        type: "json_schema",
-                        json_schema: {
-                            name: "ml_extractor",
-                            schema: {
-                                type: "object",
-                                properties: {
-                                    links: {
-                                        type: "array",
-                                        items: {
-                                            type: "string",
-                                            description: "URL do produto no Mercado Livre"
-                                        }
-                                    }
-                                },
-                                required: ["links"],
-                                additionalProperties: false
-                            }
-                        }
-                    }
+                // --- GERAÇÃO LINK EXTRACTOR ---
+                // Inicializa o modelo com a instrução de sistema específica
+                const linkModel = genAI.getGenerativeModel({
+                    model: "gemini-2.5-flash",
+                    systemInstruction: systemMessagePromptLinkExtractor
                 });
 
-                const completionExtractorContent = JSON.parse(completion.choices[0].message?.content || '{}')
-                const generatedLinksByOpenAI = completionExtractorContent.links
+                const linkResult = await linkModel.generateContent({
+                    contents: [
+                        { role: 'user', parts: [{ text: getUserMessagePromptLinkExtractor(messageBody) }] }
+                    ],
+                    generationConfig: { responseMimeType: "application/json" }
+                });
+
+                const completionExtractorContent = JSON.parse(linkResult.response.text())
+                const generatedLinksByAI = completionExtractorContent.links || []
                 let isDiscountOnTheAd = completionExtractorContent.discountOnTheAd || false
                 let outputMessage = ''
 
-                for (const link of generatedLinksByOpenAI) {
+                for (const link of generatedLinksByAI) {
                     try {
-						const page = await browserContext!.newPage()
-						await page.goto(link, {
-							waitUntil: 'domcontentloaded',
-						})
+                        const page = await browserContext!.newPage()
+                        await page.goto(link, {
+                            waitUntil: 'domcontentloaded',
+                        })
 
+                        const isFreeShippingFull = await getFreeShippingFull(link, page)
                         const itemLink = await getItemLink(link, page)
                         const coupoun = await getItemCoupoun(link, page)
                         const price = await getItemPrice(link, page)
-                        const discountText = await getItemDiscountText(link, page)
+                        const oldPrice = await getItemOldPrice(link, page)
+                        const discountData = await getItemDiscountText(link, page)
+                        const paymentMethod = await getItemPaymentMethod(link, page)
+                        const title = await getItemTitle(link, page)
+                        const isStoreVerified = await getStoreVerified(link, page)
 
-						await page.close()
+                        await page.close()
 
                         if (coupoun && !('error' in coupoun)) {
                             isDiscountOnTheAd = coupoun.isDiscountOnTheAd
@@ -213,33 +222,37 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
                         let discountLimit = null
                         let discountPercentage = null
-                        if (discountText) {
-                            const discountCompletion = await openai.chat.completions.create({
-                                model: "gpt-4o-mini",
-                                messages: [
-                                    { role: "system", content: getSystemMessagePromptDiscountExtractor() },
-                                    { role: "user", content: getUserMessagePromptDiscountExtractor(discountText) }
-                                ],
-                                response_format: { 
-                                    type: "json_schema",
-                                    json_schema: {
-                                        name: "discount_limit",
-                                        schema: {
-                                            type: "object",
-                                            properties: {
-                                                limit: { type: ["number", "null"] },
-                                                discount_percentage: { type: ["number", "null"] }
-                                            },
-                                            required: ["limit", "discount_percentage"],
-                                            additionalProperties: false
-                                        },
-                                        strict: true
-                                    }
-                                }
+                        
+                        if (discountData.discountText) {
+                            const textToAnalyze = `${discountData.discountText}. ${discountData.minCartValueText || ''}`
+                            
+                            // --- GERAÇÃO DISCOUNT EXTRACTOR ---
+                            const discountModel = genAI.getGenerativeModel({
+                                model: "gemini-2.5-flash",
+                                systemInstruction: getSystemMessagePromptDiscountExtractor()
                             });
-                            const discountContent = JSON.parse(discountCompletion.choices[0].message?.content || '{}')
+
+                            const discountResult = await discountModel.generateContent({
+                                contents: [
+                                    { role: 'user', parts: [{ text: getUserMessagePromptDiscountExtractor(textToAnalyze) }] }
+                                ],
+                                generationConfig: { responseMimeType: "application/json" }
+                            });
+                            
+                            const discountContent = JSON.parse(discountResult.response.text())
                             discountLimit = discountContent.limit
                             discountPercentage = discountContent.discount_percentage
+
+                            const minCartValue = discountContent.min_cart_value
+
+                            if (minCartValue && typeof price === 'string') {
+                                const numericPrice = parseFloat(price.replace(/[^\d,]/g, '').replace(',', '.'));
+                                if (minCartValue > numericPrice) {
+                                    isDiscountOnTheAd = false
+                                    discountLimit = null
+                                    discountPercentage = null
+                                }
+                            }
                         }
 
                         if (typeof itemLink === 'object' && ('error' in itemLink)) {
@@ -267,26 +280,36 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
                             continue
                         }
 
-                        const completion = await openai.chat.completions.create({
-                            model: "gpt-4o-mini",
-                            messages: [
-                                { role: "system", content: getSystemMessagePromptMessageFormatter() },
-                                {
-                                    role: "user", content: getUserMessagePromptMessageFormatter({
-                                        itemCoupon: (coupoun && !('error' in coupoun)) ? coupoun.coupon : "",
-                                        itemLink,
-                                        itemPrice: typeof price == 'string' ? price : "",
-                                        itemSummary: messageBody,
-                                        isDiscountOnTheAd,
-                                        discountLimit,
-                                        discountPercentage
-                                    })
-                                }
+                        const itemCoupon = isDiscountOnTheAd ? '' : (coupoun && !('error' in coupoun)) ? coupoun.coupon : ""
+
+                        // --- GERAÇÃO MESSAGE FORMATTER ---
+                        const formatterModel = genAI.getGenerativeModel({
+                            model: "gemini-2.5-flash",
+                            systemInstruction: getSystemMessagePromptMessageFormatter()
+                        });
+
+                        const formatterResult = await formatterModel.generateContent({
+                            contents:[
+                                { role: 'user', parts: [{ text: getUserMessagePromptMessageFormatter({
+                                    itemCoupon,
+                                    itemLink,
+                                    itemPrice: typeof price == 'string' ? price : "",
+                                    itemOldPrice: typeof oldPrice == 'string' ? oldPrice : null,
+                                    itemSummary: messageBody,
+                                    isDiscountOnTheAd,
+                                    discountLimit,
+                                    discountPercentage,
+                                    itemPaymentMethod: typeof paymentMethod == 'string' ? paymentMethod : null,
+                                    itemTitle: typeof title == 'string' ? title : null,
+                                    isFreeShippingFull: itemCoupon ? false : isFreeShippingFull,
+                                    isStoreVerified
+                                }) }] }
                             ]
                         });
 
-                        outputMessage += `\n ${completion.choices[0].message.content}`;
-						outputMessage = outputMessage.trimStart()
+                        outputMessage += `\n ${formatterResult.response.text()}`;
+                        outputMessage += confirmationMessage
+                        outputMessage = outputMessage.trim()
                     } catch (error) {
                         console.log(error)
                     }
@@ -299,6 +322,91 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
                     "image",
                     mimetype
                 )
+            }, 
+            conversationReplyMessage: async () => {
+                const quotedMessage = data.contextInfo?.quotedMessage
+                let quotedMessageBody = quotedMessage.imageMessage.caption
+                
+                messageBody = message.conversation || message.extendedTextMessage?.text
+
+                const isApproved = isConfirmationMessage(messageBody)
+
+                const quotedMessageKey: proto.IMessageKey = {
+                    id: data.contextInfo.stanzaId,
+                    remoteJid: remoteJidMessage,
+                    fromMe: true
+                }
+
+                
+                let mediaToSend = '';
+                
+                if (isApproved) {
+                    try {
+                        mediaToSend = await getImageBase64FromEvolution(quotedMessageKey);
+                    } catch (err) {
+                        console.error('Falha ao baixar imagem da mensagem citada:', err);
+                    }
+                
+                    if (mediaToSend) {
+                        const releaseGroups = await sendFlowApi.getTestReleaseGroup()
+
+                        for (const group of releaseGroups) {
+                            const remoteJidGroup = group.jid
+
+                            const delay = getRandomDelay(5000, 7000)
+                            await new Promise(resolve => setTimeout(resolve, delay))
+
+                            await sendToEvolution(
+                                quotedMessageBody.replace(confirmationMessage, '').trim(),
+                                mediaToSend,
+                                remoteJidGroup,
+                                "image",
+                                quotedMessage.imageMessage.mimetype
+                            )
+                        }
+                    }
+                    
+                    return
+                }
+
+                if (!quotedMessageBody) return
+
+                // --- GERAÇÃO MESSAGE MODIFIER ---
+                const modifierModel = genAI.getGenerativeModel({
+                    model: "gemini-2.5-flash",
+                    systemInstruction: getSystemMessagePromptMessageModifier()
+                });
+
+                const modifierResult = await modifierModel.generateContent({
+                    contents: [
+                        { role: 'user', parts: [{ text: getUserMessagePromptMessageModifier(quotedMessageBody, messageBody) }] }
+                    ],
+                    generationConfig: { responseMimeType: "application/json" }
+                });
+
+                const modificationResult = JSON.parse(modifierResult.response.text())
+
+                if (modificationResult.hasModification && modificationResult.modifiedMessage) {
+                    let outputMessage = modificationResult.modifiedMessage
+                    outputMessage += confirmationMessage
+
+                    try {
+                        mediaToSend = await getImageBase64FromEvolution(quotedMessageKey);
+                    } catch (err) {
+                        console.error('Falha ao baixar imagem da mensagem citada:', err);
+                    }
+                    
+                    if (mediaToSend) {
+                        await sendToEvolution(
+                            outputMessage,
+                            mediaToSend,
+                            remoteJidMessage,
+                            "image",
+                            quotedMessage.imageMessage.mimetype
+                        )
+                    }
+                }
+
             }
         }
 

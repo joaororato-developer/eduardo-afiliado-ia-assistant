@@ -10,8 +10,10 @@
 		"start": "pm2 start dist/app.js --name 'minha-api'"
 	},
 	"dependencies": {
+		"@google/generative-ai": "^0.24.1",
 		"@types/axios": "^0.9.36",
 		"@whiskeysockets/baileys": "^7.0.0-rc.9",
+		"axios": "^1.13.5",
 		"dotenv": "^17.2.3",
 		"express": "^4.18.2",
 		"googleapis": "^171.2.0",
