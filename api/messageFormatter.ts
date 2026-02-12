@@ -97,6 +97,12 @@ Legenda:
 Use APENAS: 🔥🔥 (no preço), 🎟️ (no cupom), ⚡ e 🚚 (no frete full).
 REMOVA TODOS OS OUTROS (✅, 🚨, 🔗, etc) do corpo do texto (exceto do Título).
 
+### [CHECKLIST DE SEGURANÇA]
+Antes de responder, verifique:
+1. O link está presente na última linha?
+2. O link é a última coisa escrita?
+3. Se não, mova o link para o final.
+
 INSTRUÇÃO FINAL: Processe a entrada e gere APENAS o texto formatado final. Verifique duplamente se não há linha vazia entre Preço e Cupom.
 
 REGRA DOS EMOJIS: 

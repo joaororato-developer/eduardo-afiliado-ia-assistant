@@ -17,6 +17,12 @@ interface ReleaseGroupsResponse {
 	name: string
 }
 
+interface SendToReleaseRequest {
+	accountId: string | string [] | undefined
+	caption: string
+	url: string // url da imagem
+	groupIds: string[]
+}
 
 class SendFlowApi {
 
@@ -33,6 +39,32 @@ class SendFlowApi {
 		const { data } = response
 		
 		return data as ReleaseGroupsResponse[]
+	}
+
+	public async sendToTestRelease(data: SendToReleaseRequest): Promise<void> {
+		if (!data.accountId) return
+
+		await sendflowApiAxios.post(`/actions/send-image-message`, {
+			...data, 
+			releaseId: process.env.SENDFLOW_TEST_RELEASE_ID,
+			accountId: data.accountId, 
+			chooseSpecificGroups: true, 
+		})
+	}
+	
+	public async sendToMainRelease(data: SendToReleaseRequest): Promise<void> {
+		await sendflowApiAxios.post(`/actions/send-image-message`, {
+			...data, 
+			releaseId: process.env.SENDFLOW_MAIN_RELEASE_ID,
+			accountId: Array.isArray(data.accountId) ? data.accountId : [data.accountId]
+		})
+	}
+
+	public async getAccountIdsFromRelease(releaseId: string): Promise<string[] | undefined> {
+		const response = await sendflowApiAxios.get(`/releases/${releaseId}`)
+		const { data } = response as { data: { accountIds: string[] } }
+
+		if (data?.accountIds) return data.accountIds		
 	}
 }
 

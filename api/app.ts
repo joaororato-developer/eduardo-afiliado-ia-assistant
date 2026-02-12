@@ -3,7 +3,7 @@ config()
 import { google } from 'googleapis';
 import express, { Request, Response } from 'express';
 import { Browser, BrowserContext, chromium, Page } from "playwright"
-import { genAI } from './gemini'; // Importa a instância do GoogleGenerativeAI
+import { genAI } from './gemini'; 
 import { loginMercadoLivre } from "./mercadolivreAuth";
 import { loginGoogle } from "./googleAuth";
 import { getSystemMessagePromptLinkExtractor, getUserMessagePromptLinkExtractor } from "./linkExtractor";
@@ -14,6 +14,7 @@ import { getSystemMessagePromptDiscountExtractor, getUserMessagePromptDiscountEx
 import { getSystemMessagePromptMessageModifier, getUserMessagePromptMessageModifier } from "./messageModifier";
 import { getRandomDelay } from "./utils";
 import { sendFlowApi } from "./sendflow";
+import { uploadBase64ToR2 } from "./r2";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,14 +36,33 @@ const browserInstance = chromium.launchPersistentContext(
     }
 );
 
+function chunkByGroups<T>(array: T[], groups: number): T[][] {
+	if (groups <= 0) {
+	  throw new Error("groups must be greater than 0");
+	}
+  
+	const result: T[][] = [];
+	const chunkSize = Math.ceil(array.length / groups);
+  
+	for (let i = 0; i < array.length; i += chunkSize) {
+	  result.push(array.slice(i, i + chunkSize));
+	}
+  
+	return result;
+  }
+
 export let browserContext: BrowserContext | null = null
 
 const waitLogin = async () => {
-    browserContext = await browserInstance;
-    const page = await browserContext.newPage();
-
-    await loginGoogle(page, browserContext);
-    await loginMercadoLivre(page, browserContext);
+    try {
+		browserContext = await browserInstance;
+		const page = await browserContext.newPage();
+	
+		await loginGoogle(page, browserContext);
+		await loginMercadoLivre(page, browserContext);
+	} catch (err) {
+		console.error(err)
+	}
 };
 
 
@@ -138,284 +158,294 @@ const sendToEvolution = async (
 };
 
 app.post('/receive-whatsapp', (req: Request, res: Response) => {
-    setImmediate(async () => {
-        const { data } = req.body
-        const { key } = data
+	setImmediate(async () => {
+		try {
+			const { data } = req.body
+			const { key } = data
 
-        if (!key || key.fromMe) return
+			if (!key || key.fromMe) return
 
-        const { remoteJid: remoteJidMessage, id: messageId } = key
-        const { message } = data 
-        let { messageType } = data
-        const remoteJidGroupAllowed = process.env.AUTOMATION_GROUP
+			const { remoteJid: remoteJidMessage, id: messageId } = key
+			const { message } = data 
+			let { messageType } = data
+			const remoteJidGroupAllowed = process.env.AUTOMATION_GROUP
 
-        if (remoteJidGroupAllowed !== remoteJidMessage) return
+			if (remoteJidGroupAllowed !== remoteJidMessage) return
 
-        let messageBody = ''
+			let messageBody = ''
 
-        if (data.contextInfo?.quotedMessage) {
-            messageType = `${messageType}ReplyMessage`
-        }
+			if (data.contextInfo?.quotedMessage) {
+				messageType = `${messageType}ReplyMessage`
+			}
 
-        if (!messageType) return
+			if (!messageType) return
 
-        const systemMessagePromptLinkExtractor = getSystemMessagePromptLinkExtractor(`mercadolivre.com`)
+			const systemMessagePromptLinkExtractor = getSystemMessagePromptLinkExtractor(`mercadolivre.com`)
 
-        const messageTypeFunctionsMap: { [key: string]: () => Promise<any> } = {
-            imageMessage: async () => {
-                messageBody = message.imageMessage.caption
-                const { url: imageUrl, mimetype } = message.imageMessage
-                const mediaType = mimetype.split('/')[0]
+			const messageTypeFunctionsMap: { [key: string]: () => Promise<any> } = {
+				imageMessage: async () => {
+					messageBody = message.imageMessage.caption
+					const { url: imageUrl, mimetype } = message.imageMessage
+					const mediaType = mimetype.split('/')[0]
 
-                let mediaToSend = '';
-                try {
-                    mediaToSend = await getImageBase64FromEvolution(key);
-                } catch (err) {
-                    console.error('Falha ao baixar da Evolution:', err);
-                }
+					let mediaToSend = '';
+					try {
+						mediaToSend = await getImageBase64FromEvolution(key);
+					} catch (err) {
+						console.error('Falha ao baixar da Evolution:', err);
+					}
 
-                if (!mediaToSend) {
-                    return;
-                }
+					if (!mediaToSend) {
+						return;
+					}
 
-                // --- GERAÇÃO LINK EXTRACTOR ---
-                // Inicializa o modelo com a instrução de sistema específica
-                const linkModel = genAI.getGenerativeModel({
-                    model: "gemini-2.5-flash",
-                    systemInstruction: systemMessagePromptLinkExtractor
-                });
+					const linkModel = genAI.getGenerativeModel({
+						model: "gemini-2.5-flash",
+						systemInstruction: systemMessagePromptLinkExtractor
+					});
 
-                const linkResult = await linkModel.generateContent({
-                    contents: [
-                        { role: 'user', parts: [{ text: getUserMessagePromptLinkExtractor(messageBody) }] }
-                    ],
-                    generationConfig: { responseMimeType: "application/json" }
-                });
+					const linkResult = await linkModel.generateContent({
+						contents: [
+							{ role: 'user', parts: [{ text: getUserMessagePromptLinkExtractor(messageBody) }] }
+						],
+						generationConfig: { responseMimeType: "application/json" }
+					});
 
-                const completionExtractorContent = JSON.parse(linkResult.response.text())
-                const generatedLinksByAI = completionExtractorContent.links || []
-                let isDiscountOnTheAd = completionExtractorContent.discountOnTheAd || false
-                let outputMessage = ''
+					const completionExtractorContent = JSON.parse(linkResult.response.text())
+					const generatedLinksByAI = completionExtractorContent.links || []
+					let isDiscountOnTheAd = completionExtractorContent.discountOnTheAd || false
+					let outputMessage = ''
 
-                for (const link of generatedLinksByAI) {
-                    try {
-                        const page = await browserContext!.newPage()
-                        await page.goto(link, {
-                            waitUntil: 'domcontentloaded',
-                        })
+					for (const link of generatedLinksByAI) {
+						try {
+							const page = await browserContext!.newPage()
+							await page.goto(link, {
+								waitUntil: 'domcontentloaded',
+							})
 
-                        const isFreeShippingFull = await getFreeShippingFull(link, page)
-                        const itemLink = await getItemLink(link, page)
-                        const coupoun = await getItemCoupoun(link, page)
-                        const price = await getItemPrice(link, page)
-                        const oldPrice = await getItemOldPrice(link, page)
-                        const discountData = await getItemDiscountText(link, page)
-                        const paymentMethod = await getItemPaymentMethod(link, page)
-                        const title = await getItemTitle(link, page)
-                        const isStoreVerified = await getStoreVerified(link, page)
+							const isFreeShippingFull = await getFreeShippingFull(link, page)
+							const itemLink = await getItemLink(link, page)
+							const coupoun = await getItemCoupoun(link, page)
+							const price = await getItemPrice(link, page)
+							const oldPrice = await getItemOldPrice(link, page)
+							const discountData = await getItemDiscountText(link, page)
+							const paymentMethod = await getItemPaymentMethod(link, page)
+							const title = await getItemTitle(link, page)
+							const isStoreVerified = await getStoreVerified(link, page)
 
-                        await page.close()
+							await page.close()
 
-                        if (coupoun && !('error' in coupoun)) {
-                            isDiscountOnTheAd = coupoun.isDiscountOnTheAd
-                        }
+							if (coupoun && !('error' in coupoun)) {
+								isDiscountOnTheAd = coupoun.isDiscountOnTheAd
+							}
 
-                        let discountLimit = null
-                        let discountPercentage = null
-                        
-                        if (discountData.discountText) {
-                            const textToAnalyze = `${discountData.discountText}. ${discountData.minCartValueText || ''}`
-                            
-                            // --- GERAÇÃO DISCOUNT EXTRACTOR ---
-                            const discountModel = genAI.getGenerativeModel({
-                                model: "gemini-2.5-flash",
-                                systemInstruction: getSystemMessagePromptDiscountExtractor()
-                            });
+							let discountLimit = null
+							let discountPercentage = null
+							
+							if (discountData.discountText) {
+								const textToAnalyze = `${discountData.discountText}. ${discountData.minCartValueText || ''}`
+								
+								const discountModel = genAI.getGenerativeModel({
+									model: "gemini-2.5-flash",
+									systemInstruction: getSystemMessagePromptDiscountExtractor()
+								});
 
-                            const discountResult = await discountModel.generateContent({
-                                contents: [
-                                    { role: 'user', parts: [{ text: getUserMessagePromptDiscountExtractor(textToAnalyze) }] }
-                                ],
-                                generationConfig: { responseMimeType: "application/json" }
-                            });
-                            
-                            const discountContent = JSON.parse(discountResult.response.text())
-                            discountLimit = discountContent.limit
-                            discountPercentage = discountContent.discount_percentage
+								const discountResult = await discountModel.generateContent({
+									contents: [
+										{ role: 'user', parts: [{ text: getUserMessagePromptDiscountExtractor(textToAnalyze) }] }
+									],
+									generationConfig: { responseMimeType: "application/json" }
+								});
+								
+								const discountContent = JSON.parse(discountResult.response.text())
+								discountLimit = discountContent.limit
+								discountPercentage = discountContent.discount_percentage
 
-                            const minCartValue = discountContent.min_cart_value
+								const minCartValue = discountContent.min_cart_value
 
-                            if (minCartValue && typeof price === 'string') {
-                                const numericPrice = parseFloat(price.replace(/[^\d,]/g, '').replace(',', '.'));
-                                if (minCartValue > numericPrice) {
-                                    isDiscountOnTheAd = false
-                                    discountLimit = null
-                                    discountPercentage = null
-                                }
-                            }
-                        }
+								if (minCartValue && typeof price === 'string') {
+									const numericPrice = parseFloat(price.replace(/[^\d,]/g, '').replace(',', '.'));
+									if (minCartValue > numericPrice) {
+										isDiscountOnTheAd = false
+										discountLimit = null
+										discountPercentage = null
+									}
+								}
+							}
 
-                        if (typeof itemLink === 'object' && ('error' in itemLink)) {
-                            outputMessage += `\n ${itemLink.error}`
-                        }
+							if (typeof itemLink === 'object' && ('error' in itemLink)) {
+								outputMessage += `\n ${itemLink.error}`
+							}
 
-                        if (typeof price === 'object' && ('error' in price)) {
-                            outputMessage += `\n ${price.error}`
-                        }
+							if (typeof price === 'object' && ('error' in price)) {
+								outputMessage += `\n ${price.error}`
+							}
 
-                        if (outputMessage) {
-                            outputMessage =
-                                `ERROS:[${outputMessage}] 
-                                `
-                        }
+							if (outputMessage) {
+								outputMessage =
+									`ERROS:[${outputMessage}] 
+									`
+							}
 
-                        if (typeof itemLink !== 'string') {
-                            await sendToEvolution(
-                                outputMessage,
-                                mediaToSend,
-                                remoteJidMessage,
-                                "image",
-                                mimetype
-                            )
-                            continue
-                        }
+							if (typeof itemLink !== 'string') {
+								await sendToEvolution(
+									outputMessage,
+									mediaToSend,
+									remoteJidMessage,
+									"image",
+									mimetype
+								)
+								continue
+							}
 
-                        const itemCoupon = isDiscountOnTheAd ? '' : (coupoun && !('error' in coupoun)) ? coupoun.coupon : ""
+							const itemCoupon = isDiscountOnTheAd ? '' : (coupoun && !('error' in coupoun)) ? coupoun.coupon : ""
 
-                        // --- GERAÇÃO MESSAGE FORMATTER ---
-                        const formatterModel = genAI.getGenerativeModel({
-                            model: "gemini-2.5-flash",
-                            systemInstruction: getSystemMessagePromptMessageFormatter()
-                        });
+							const formatterModel = genAI.getGenerativeModel({
+								model: "gemini-2.5-flash",
+								systemInstruction: getSystemMessagePromptMessageFormatter()
+							});
 
-                        const formatterResult = await formatterModel.generateContent({
-                            contents:[
-                                { role: 'user', parts: [{ text: getUserMessagePromptMessageFormatter({
-                                    itemCoupon,
-                                    itemLink,
-                                    itemPrice: typeof price == 'string' ? price : "",
-                                    itemOldPrice: typeof oldPrice == 'string' ? oldPrice : null,
-                                    itemSummary: messageBody,
-                                    isDiscountOnTheAd,
-                                    discountLimit,
-                                    discountPercentage,
-                                    itemPaymentMethod: typeof paymentMethod == 'string' ? paymentMethod : null,
-                                    itemTitle: typeof title == 'string' ? title : null,
-                                    isFreeShippingFull: itemCoupon ? false : isFreeShippingFull,
-                                    isStoreVerified
-                                }) }] }
-                            ]
-                        });
+							const formatterResult = await formatterModel.generateContent({
+								contents:[
+									{ role: 'user', parts: [{ text: getUserMessagePromptMessageFormatter({
+										itemCoupon,
+										itemLink,
+										itemPrice: typeof price == 'string' ? price : "",
+										itemOldPrice: typeof oldPrice == 'string' ? oldPrice : null,
+										itemSummary: messageBody,
+										isDiscountOnTheAd,
+										discountLimit,
+										discountPercentage,
+										itemPaymentMethod: typeof paymentMethod == 'string' ? paymentMethod : null,
+										itemTitle: typeof title == 'string' ? title : null,
+										isFreeShippingFull: itemCoupon ? false : isFreeShippingFull,
+										isStoreVerified
+									}) }] }
+								]
+							});
 
-                        outputMessage += `\n ${formatterResult.response.text()}`;
-                        outputMessage += confirmationMessage
-                        outputMessage = outputMessage.trim()
-                    } catch (error) {
-                        console.log(error)
-                    }
-                }
+							outputMessage += `\n ${formatterResult.response.text()}`;
+							outputMessage += confirmationMessage
+							outputMessage = outputMessage.trim()
+						} catch (error) {
+							console.log(error)
+						}
+					}
 
-                await sendToEvolution(
-                    outputMessage,
-                    mediaToSend,
-                    remoteJidMessage,
-                    "image",
-                    mimetype
-                )
-            }, 
-            conversationReplyMessage: async () => {
-                const quotedMessage = data.contextInfo?.quotedMessage
-                let quotedMessageBody = quotedMessage.imageMessage.caption
-                
-                messageBody = message.conversation || message.extendedTextMessage?.text
+					await sendToEvolution(
+						outputMessage,
+						mediaToSend,
+						remoteJidMessage,
+						"image",
+						mimetype
+					)
+				}, 
+				conversationReplyMessage: async () => {
+					const quotedMessage = data.contextInfo?.quotedMessage
+					let quotedMessageBody = quotedMessage.imageMessage.caption
+					
+					messageBody = message.conversation || message.extendedTextMessage?.text
 
-                const isApproved = isConfirmationMessage(messageBody)
+					const isApproved = isConfirmationMessage(messageBody)
 
-                const quotedMessageKey: proto.IMessageKey = {
-                    id: data.contextInfo.stanzaId,
-                    remoteJid: remoteJidMessage,
-                    fromMe: true
-                }
+					const quotedMessageKey: proto.IMessageKey = {
+						id: data.contextInfo.stanzaId,
+						remoteJid: remoteJidMessage,
+						fromMe: true
+					}
 
-                
-                let mediaToSend = '';
-                
-                if (isApproved) {
-                    try {
-                        mediaToSend = await getImageBase64FromEvolution(quotedMessageKey);
-                    } catch (err) {
-                        console.error('Falha ao baixar imagem da mensagem citada:', err);
-                    }
-                
-                    if (mediaToSend) {
-                        const releaseGroups = await sendFlowApi.getTestReleaseGroup()
+					
+					let mediaToSend = '';
+					
+					if (isApproved) {
+						try {
+							mediaToSend = await getImageBase64FromEvolution(quotedMessageKey);
+						} catch (err) {
+							console.error('Falha ao baixar imagem da mensagem citada:', err);
+						}
+					
+						if (mediaToSend) {
+							const accountIdsFromRelease = await sendFlowApi.getAccountIdsFromRelease(process.env.SENDFLOW_TEST_RELEASE_ID as string)
+							if (!accountIdsFromRelease) return
 
-                        for (const group of releaseGroups) {
-                            const remoteJidGroup = group.jid
+							const groupsRelease = await sendFlowApi.getTestReleaseGroup()
+							
+							const publicUrl = await uploadBase64ToR2(mediaToSend, quotedMessage.imageMessage.mimetype || 'image/jpeg');
 
-                            const delay = getRandomDelay(5000, 7000)
-                            await new Promise(resolve => setTimeout(resolve, delay))
+							const groupsGroupedByAccountId = []
 
-                            await sendToEvolution(
-                                quotedMessageBody.replace(confirmationMessage, '').trim(),
-                                mediaToSend,
-                                remoteJidGroup,
-                                "image",
-                                quotedMessage.imageMessage.mimetype
-                            )
-                        }
-                    }
-                    
-                    return
-                }
+							const groupGids = groupsRelease.map(group => group.gid.replace('@g.us', ''))
 
-                if (!quotedMessageBody) return
+							const groupGidsDivided = chunkByGroups(groupGids, accountIdsFromRelease?.length || 1)
 
-                // --- GERAÇÃO MESSAGE MODIFIER ---
-                const modifierModel = genAI.getGenerativeModel({
-                    model: "gemini-2.5-flash",
-                    systemInstruction: getSystemMessagePromptMessageModifier()
-                });
+							const accountIdsWithGroupsDivided = accountIdsFromRelease.map((accountId, index) => ({
+								accountId,
+								groupGids: groupGidsDivided[index as number]
+							
+							}))
 
-                const modifierResult = await modifierModel.generateContent({
-                    contents: [
-                        { role: 'user', parts: [{ text: getUserMessagePromptMessageModifier(quotedMessageBody, messageBody) }] }
-                    ],
-                    generationConfig: { responseMimeType: "application/json" }
-                });
+							for (const account of accountIdsWithGroupsDivided) {
+								await sendFlowApi.sendToTestRelease({
+									accountId: account.accountId,
+									caption: quotedMessageBody.replace(confirmationMessage, '').trim(),
+									url: publicUrl,
+									groupIds: account.groupGids
+								} as any)
+							}
+						}
+						
+						return
+					}
 
-                const modificationResult = JSON.parse(modifierResult.response.text())
+					if (!quotedMessageBody) return
 
-                if (modificationResult.hasModification && modificationResult.modifiedMessage) {
-                    let outputMessage = modificationResult.modifiedMessage
-                    outputMessage += confirmationMessage
+					const modifierModel = genAI.getGenerativeModel({
+						model: "gemini-2.5-flash",
+						systemInstruction: getSystemMessagePromptMessageModifier()
+					});
 
-                    try {
-                        mediaToSend = await getImageBase64FromEvolution(quotedMessageKey);
-                    } catch (err) {
-                        console.error('Falha ao baixar imagem da mensagem citada:', err);
-                    }
-                    
-                    if (mediaToSend) {
-                        await sendToEvolution(
-                            outputMessage,
-                            mediaToSend,
-                            remoteJidMessage,
-                            "image",
-                            quotedMessage.imageMessage.mimetype
-                        )
-                    }
-                }
+					const modifierResult = await modifierModel.generateContent({
+						contents: [
+							{ role: 'user', parts: [{ text: getUserMessagePromptMessageModifier(quotedMessageBody, messageBody) }] }
+						],
+						generationConfig: { responseMimeType: "application/json" }
+					});
 
-            }
-        }
+					const modificationResult = JSON.parse(modifierResult.response.text())
 
-        const messageTypeFunction = messageTypeFunctionsMap[messageType]
+					if (modificationResult.hasModification && modificationResult.modifiedMessage) {
+						let outputMessage = modificationResult.modifiedMessage
+						outputMessage += confirmationMessage
 
-        if (!messageTypeFunction) return
+						try {
+							mediaToSend = await getImageBase64FromEvolution(quotedMessageKey);
+						} catch (err) {
+							console.error('Falha ao baixar imagem da mensagem citada:', err);
+						}
+						
+						if (mediaToSend) {
+							await sendToEvolution(
+								outputMessage,
+								mediaToSend,
+								remoteJidMessage,
+								"image",
+								quotedMessage.imageMessage.mimetype
+							)
+						}
+					}
 
-        await messageTypeFunction()
-    })
+				}
+			}
+
+			const messageTypeFunction = messageTypeFunctionsMap[messageType]
+
+			if (!messageTypeFunction) return
+
+			await messageTypeFunction()
+		}catch(err) {
+			console.error(err)
+		}
+	})
 
     return res.status(200).json({
         body: req.body
