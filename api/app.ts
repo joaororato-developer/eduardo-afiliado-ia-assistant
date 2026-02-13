@@ -65,10 +65,6 @@ const waitLogin = async () => {
 	}
 };
 
-
-const confirmationMessage = `\n\n---/---
-Enviar para as campanhas ou realizar alguma alteração?`
-
 const normalizeText = (text: string) => {
     return text.normalize('NFD').replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
@@ -325,7 +321,6 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 							});
 
 							outputMessage += `\n ${formatterResult.response.text()}`;
-							outputMessage += confirmationMessage
 							outputMessage = outputMessage.trim()
 						} catch (error) {
 							console.log(error)
@@ -365,10 +360,10 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 						}
 					
 						if (mediaToSend) {
-							const accountIdsFromRelease = await sendFlowApi.getAccountIdsFromRelease(process.env.SENDFLOW_TEST_RELEASE_ID as string)
+							const accountIdsFromRelease = await sendFlowApi.getAccountIdsFromRelease(process.env.SENDFLOW_MAIN_RELEASE_ID as string)
 							if (!accountIdsFromRelease) return
 
-							const groupsRelease = await sendFlowApi.getTestReleaseGroup()
+							const groupsRelease = await sendFlowApi.getMainReleaseGroup()
 							
 							const publicUrl = await uploadBase64ToR2(mediaToSend, quotedMessage.imageMessage.mimetype || 'image/jpeg');
 
@@ -385,9 +380,9 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 							}))
 
 							for (const account of accountIdsWithGroupsDivided) {
-								await sendFlowApi.sendToTestRelease({
+								await sendFlowApi.sendToMainRelease({
 									accountId: account.accountId,
-									caption: quotedMessageBody.replace(confirmationMessage, '').trim(),
+									caption: quotedMessageBody.trim(),
 									url: publicUrl,
 									groupIds: account.groupGids
 								} as any)
@@ -415,7 +410,6 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
 					if (modificationResult.hasModification && modificationResult.modifiedMessage) {
 						let outputMessage = modificationResult.modifiedMessage
-						outputMessage += confirmationMessage
 
 						try {
 							mediaToSend = await getImageBase64FromEvolution(quotedMessageKey);

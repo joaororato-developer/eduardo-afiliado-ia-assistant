@@ -53,10 +53,13 @@ class SendFlowApi {
 	}
 	
 	public async sendToMainRelease(data: SendToReleaseRequest): Promise<void> {
+		if (!data.accountId) return
+
 		await sendflowApiAxios.post(`/actions/send-image-message`, {
 			...data, 
 			releaseId: process.env.SENDFLOW_MAIN_RELEASE_ID,
-			accountId: Array.isArray(data.accountId) ? data.accountId : [data.accountId]
+			accountId: data.accountId, 
+			chooseSpecificGroups: true, 
 		})
 	}
 
