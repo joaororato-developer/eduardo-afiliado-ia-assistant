@@ -164,9 +164,10 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 			const { remoteJid: remoteJidMessage, id: messageId } = key
 			const { message } = data 
 			let { messageType } = data
-			const remoteJidGroupAllowed = process.env.AUTOMATION_GROUP
+			const remoteJidGroupAllowed = [process.env.AUTOMATION_GROUP, process.env.AUTOMATION_GROUP_PERFUME]
+			const isPerfumeRelease = process.env.AUTOMATION_GROUP_PERFUME === remoteJidMessage
 
-			if (remoteJidGroupAllowed !== remoteJidMessage) return
+			if (!remoteJidGroupAllowed.includes(remoteJidMessage)) return
 
 			let messageBody = ''
 
@@ -360,10 +361,10 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 						}
 					
 						if (mediaToSend) {
-							const accountIdsFromRelease = await sendFlowApi.getAccountIdsFromRelease(process.env.SENDFLOW_MAIN_RELEASE_ID as string)
+							const accountIdsFromRelease = await sendFlowApi.getAccountIdsFromRelease((isPerfumeRelease ? process.env.SENDFLOW_PERFUME_RELEASE_ID : process.env.SENDFLOW_MAIN_RELEASE_ID) as string)
 							if (!accountIdsFromRelease) return
 
-							const groupsRelease = await sendFlowApi.getMainReleaseGroup()
+							const groupsRelease = await sendFlowApi[isPerfumeRelease ? 'getPerfumeReleaseGroup' : 'getMainReleaseGroup']()
 							
 							const publicUrl = await uploadBase64ToR2(mediaToSend, quotedMessage.imageMessage.mimetype || 'image/jpeg');
 
@@ -380,7 +381,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 							}))
 
 							for (const account of accountIdsWithGroupsDivided) {
-								await sendFlowApi.sendToMainRelease({
+								await sendFlowApi[isPerfumeRelease ? 'sendToPerfumeRelease' : 'sendToMainRelease']({
 									accountId: account.accountId,
 									caption: quotedMessageBody.trim(),
 									url: publicUrl,

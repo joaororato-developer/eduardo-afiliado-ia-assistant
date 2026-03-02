@@ -41,6 +41,13 @@ class SendFlowApi {
 		return data as ReleaseGroupsResponse[]
 	}
 
+	public async getPerfumeReleaseGroup(): Promise<ReleaseGroupsResponse[]> {
+		const response = await sendflowApiAxios.get(`/releases/${process.env.SENDFLOW_PERFUME_RELEASE_ID}/groups`)
+		const { data } = response
+		
+		return data as ReleaseGroupsResponse[]
+	}
+
 	public async sendToTestRelease(data: SendToReleaseRequest): Promise<void> {
 		if (!data.accountId) return
 
@@ -58,6 +65,17 @@ class SendFlowApi {
 		await sendflowApiAxios.post(`/actions/send-image-message`, {
 			...data, 
 			releaseId: process.env.SENDFLOW_MAIN_RELEASE_ID,
+			accountId: data.accountId, 
+			chooseSpecificGroups: true, 
+		})
+	}
+
+	public async sendToPerfumeRelease(data: SendToReleaseRequest): Promise<void> {
+		if (!data.accountId) return
+
+		await sendflowApiAxios.post(`/actions/send-image-message`, {
+			...data, 
+			releaseId: process.env.SENDFLOW_PERFUME_RELEASE_ID,
 			accountId: data.accountId, 
 			chooseSpecificGroups: true, 
 		})
