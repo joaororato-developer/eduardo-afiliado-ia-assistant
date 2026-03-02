@@ -285,13 +285,6 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 							}
 
 							if (typeof itemLink !== 'string') {
-								await sendToEvolution(
-									outputMessage,
-									mediaToSend,
-									remoteJidMessage,
-									"image",
-									mimetype
-								)
 								continue
 							}
 
