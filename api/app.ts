@@ -210,7 +210,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
 					const completionExtractorContent = JSON.parse(linkResult.response.text())
 					const generatedLinksByAI = completionExtractorContent.links || []
-					let isDiscountOnTheAd = completionExtractorContent.discountOnTheAd || false
+					let isDiscountOnTheAd = false
 					let outputMessage = ''
 
 					for (const link of generatedLinksByAI) {
@@ -220,7 +220,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 								waitUntil: 'domcontentloaded',
 							})
 
-							const isFreeShippingFull = await getFreeShippingFull(link, page)
+							const { hasFreeShipping, hasFull } = await getFreeShippingFull(link, page)
 							const itemLink = await getItemLink(link, page)
 							const coupoun = await getItemCoupoun(link, page)
 							const price = await getItemPrice(link, page)
@@ -308,7 +308,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 										discountPercentage,
 										itemPaymentMethod: typeof paymentMethod == 'string' ? paymentMethod : null,
 										itemTitle: typeof title == 'string' ? title : null,
-										isFreeShippingFull: itemCoupon ? false : isFreeShippingFull,
+										isFreeShippingFull: itemCoupon ? hasFull : (hasFreeShipping | hasFull),
 										isStoreVerified
 									}) }] }
 								]

@@ -5,17 +5,17 @@ export const getItemLink = async (itemUrl: string, page: Page) => {
 		const actionLink = page.locator(
 			'.poly-component__link.poly-component__link--action-link',
 		)
-		await actionLink.waitFor({ state: 'visible', timeout: 8000 })
+		await actionLink.waitFor({ state: 'visible', timeout: 10000 })
 		await actionLink.click()
 	
 		// Pegar link
 		let itemLink: string | null;
 	
 		const shareLinkButton = page.getByTestId('generate_link_button').filter({ hasText: 'Compartilhar' })
-		await shareLinkButton.waitFor({ state: 'visible', timeout: 8000 })
+		await shareLinkButton.waitFor({ state: 'visible', timeout: 10000 })
 		await shareLinkButton.click()
 		const linkInput = page.getByTestId('text-field__label_link')
-		await linkInput.waitFor({ state: 'visible', timeout: 8000 })
+		await linkInput.waitFor({ state: 'visible', timeout: 10000 })
 	
 		itemLink = await linkInput.inputValue()
 	
@@ -34,7 +34,7 @@ export const getItemLink = async (itemUrl: string, page: Page) => {
 export const getItemPrice = async (itemUrl: string, page: Page) => {
 	try {
 		const priceElement = page.locator('.ui-pdp-price__second-line .andes-money-amount__fraction').first()
-		await priceElement.waitFor({ state: 'visible', timeout: 8000 })
+		await priceElement.waitFor({ state: 'visible', timeout: 10000 })
 
 		let price = await priceElement.innerText()
 		
@@ -75,7 +75,7 @@ export const getItemCoupoun = async (itemUrl: string, page: Page) => {
 	try {
 		const couponsLink = page.getByTestId('action-modal-link')
 			.filter({ hasText: 'Ver cupons disponíveis' })
-		await couponsLink.waitFor({ state: 'visible', timeout: 8000 })
+		await couponsLink.waitFor({ state: 'visible', timeout: 10000 })
 
 		couponsLink && await couponsLink.click()
 		await page.waitForTimeout(500)
@@ -86,20 +86,20 @@ export const getItemCoupoun = async (itemUrl: string, page: Page) => {
 
 		let coupon: string | null = null;
 
-		await firstCouponItem.waitFor({ state: 'visible', timeout: 8000 });
+		await firstCouponItem.waitFor({ state: 'visible', timeout: 10000 });
 
 		coupon = await firstCouponItem.innerText();
 
 		if (coupon.includes('OFF ')) {
 			coupon = coupon
 				?.replace(/^.*OFF \s*/i, '')     // remove tudo antes de OFF
-				?.match(/[A-ZÀ-Ú]/g)            // pega só maiúsculas
+				?.match(/[A-ZÀ-Ú0-9_]/g)         // letras maiúsculas + números
 				?.join('') || coupon;
 		}
 
 	
-		const inputCodeCoupon = couponFrame.locator('.input-code-coupon-container .input-code-coupon').filter({ hasText: coupon });
-		const isInputCodeVisible = await inputCodeCoupon.isVisible({ timeout: 2000 });
+		let inputCodeCoupon = couponFrame.locator('.input-code-coupon-container .input-code-coupon').filter({ hasText: coupon });
+		const isInputCodeVisible = await inputCodeCoupon.isVisible({ timeout: 4000 });
 
 		return { coupon, isDiscountOnTheAd: !isInputCodeVisible }
 	} catch (error) {
@@ -169,7 +169,7 @@ export const getFreeShippingFull = async (itemUrl: string, page: Page) => {
 		const hasFreeShipping = await freeShipping.isVisible({ timeout: 2000 })
 		const hasFull = await fullIcon.isVisible({ timeout: 2000 })
 
-		return hasFreeShipping && hasFull
+		return { hasFreeShipping, hasFull }
 	} catch (error) {
 		return false
 	}
