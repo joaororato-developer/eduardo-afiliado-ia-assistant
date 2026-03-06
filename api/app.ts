@@ -177,7 +177,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
 			if (!messageType) return
 
-			const systemMessagePromptLinkExtractor = getSystemMessagePromptLinkExtractor(`mercadolivre.com`)
+			const systemMessagePromptLinkExtractor = getSystemMessagePromptLinkExtractor(`mercadolivre.com ou meli.la ou meli.com ou meli`)
 
 			const messageTypeFunctionsMap: { [key: string]: () => Promise<any> } = {
 				imageMessage: async () => {
