@@ -220,7 +220,9 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 								waitUntil: 'domcontentloaded',
 							})
 
-							const { hasFreeShipping, hasFull } = await getFreeShippingFull(link, page)
+							const freeShippingOrHasFull = await getFreeShippingFull(link, page)
+
+							const { hasFreeShipping, hasFull } = typeof freeShippingOrHasFull == 'object' ? freeShippingOrHasFull : { } 
 							const itemLink = await getItemLink(link, page)
 							const coupoun = await getItemCoupoun(link, page)
 							const price = await getItemPrice(link, page)
@@ -308,7 +310,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 										discountPercentage,
 										itemPaymentMethod: typeof paymentMethod == 'string' ? paymentMethod : null,
 										itemTitle: typeof title == 'string' ? title : null,
-										isFreeShippingFull: itemCoupon ? hasFull : (hasFreeShipping | hasFull),
+										isFreeShippingFull: itemCoupon ? hasFull : (hasFreeShipping || hasFull),
 										isStoreVerified
 									}) }] }
 								]
