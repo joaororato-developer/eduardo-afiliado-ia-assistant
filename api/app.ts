@@ -15,6 +15,7 @@ import { getSystemMessagePromptMessageModifier, getUserMessagePromptMessageModif
 import { getRandomDelay } from "./utils";
 import { sendFlowApi } from "./sendflow";
 import { uploadBase64ToR2 } from "./r2";
+import { mutex } from "./mutex";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -155,6 +156,8 @@ const sendToEvolution = async (
 
 app.post('/receive-whatsapp', (req: Request, res: Response) => {
 	setImmediate(async () => {
+		await mutex.lock()
+		
 		try {
 			const { data } = req.body
 			const { key } = data
@@ -233,6 +236,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 							const isStoreVerified = await getStoreVerified(link, page)
 
 							await page.close()
+							mutex.unlock()
 
 							if (coupoun && !('error' in coupoun)) {
 								isDiscountOnTheAd = coupoun.isDiscountOnTheAd
@@ -432,8 +436,10 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 			if (!messageTypeFunction) return
 
 			await messageTypeFunction()
-		}catch(err) {
+		} catch(err) {
 			console.error(err)
+		} finally {
+			mutex.unlock()
 		}
 	})
 

@@ -5,17 +5,17 @@ export const getItemLink = async (itemUrl: string, page: Page) => {
 		const actionLink = page.locator(
 			'.poly-component__link.poly-component__link--action-link',
 		)
-		await actionLink.waitFor({ state: 'visible', timeout: 10000 })
+		await actionLink.waitFor({ state: 'visible', timeout: 60000 })
 		await actionLink.click()
 	
 		// Pegar link
 		let itemLink: string | null;
 	
 		const shareLinkButton = page.getByTestId('generate_link_button').filter({ hasText: 'Compartilhar' })
-		await shareLinkButton.waitFor({ state: 'visible', timeout: 10000 })
+		await shareLinkButton.waitFor({ state: 'visible', timeout: 60000 })
 		await shareLinkButton.click()
 		const linkInput = page.getByTestId('text-field__label_link')
-		await linkInput.waitFor({ state: 'visible', timeout: 10000 })
+		await linkInput.waitFor({ state: 'visible', timeout: 60000 })
 	
 		itemLink = await linkInput.inputValue()
 	
