@@ -13,7 +13,7 @@ import { proto } from '@whiskeysockets/baileys'
 import { getSystemMessagePromptDiscountExtractor, getUserMessagePromptDiscountExtractor } from "./discountExtractor";
 import { getSystemMessagePromptMessageModifier, getUserMessagePromptMessageModifier } from "./messageModifier";
 import { getRandomDelay } from "./utils";
-import { sendFlowApi } from "./sendflow";
+import { ReleaseGroupsResponse, sendFlowApi } from "./sendflow";
 import { uploadBase64ToR2 } from "./r2";
 import { mutex } from "./mutex";
 
@@ -360,32 +360,85 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 						}
 					
 						if (mediaToSend) {
-							const accountIdsFromRelease = await sendFlowApi.getAccountIdsFromRelease((isPerfumeRelease ? process.env.SENDFLOW_PERFUME_RELEASE_ID : process.env.SENDFLOW_MAIN_RELEASE_ID) as string)
-							if (!accountIdsFromRelease) return
+							let accountIdsFromReleases: undefined | (Record<string, any>)[] = []
 
-							const groupsRelease = await sendFlowApi[isPerfumeRelease ? 'getPerfumeReleaseGroup' : 'getMainReleaseGroup']()
-							
+							if (isPerfumeRelease) {
+								accountIdsFromReleases = [
+									{
+										release: "perfume", 
+										accountIds: await sendFlowApi.getAccountIdsFromRelease(process.env.SENDFLOW_PERFUME_RELEASE_ID as string)
+									}
+								]
+							} else {
+								accountIdsFromReleases = [
+									{
+										release: "main",
+										accountIds: await sendFlowApi.getAccountIdsFromRelease(process.env.SENDFLOW_MAIN_RELEASE_ID as string)	
+									},
+									{
+										release: "main2",
+										accountIds: await sendFlowApi.getAccountIdsFromRelease(process.env.SENDFLOW_MAIN_2_RELEASE_ID as string)
+									}
+								]
+							}
+
+							if (!accountIdsFromReleases || !accountIdsFromReleases.length) return
+
 							const publicUrl = await uploadBase64ToR2(mediaToSend, quotedMessage.imageMessage.mimetype || 'image/jpeg');
-
-							const groupsGroupedByAccountId = []
-
-							const groupGids = groupsRelease.map(group => group.gid.replace('@g.us', ''))
-
-							const groupGidsDivided = chunkByGroups(groupGids, accountIdsFromRelease?.length || 1)
-
-							const accountIdsWithGroupsDivided = accountIdsFromRelease.map((accountId, index) => ({
-								accountId,
-								groupGids: groupGidsDivided[index as number]
 							
-							}))
+							for (const accountIdsFromRelease of accountIdsFromReleases) {
+								let groupsRelease: ReleaseGroupsResponse[] = []
+								
+								switch (accountIdsFromRelease.release) {
+									case "perfume":
+										groupsRelease = await sendFlowApi.getPerfumeReleaseGroup()
+										break
+									case "main":
+										groupsRelease = await sendFlowApi.getMainReleaseGroup()
+										break
+									case "main2":
+										groupsRelease = await sendFlowApi.getMain2ReleaseGroup()
+										break
+								}
 
-							for (const account of accountIdsWithGroupsDivided) {
-								await sendFlowApi[isPerfumeRelease ? 'sendToPerfumeRelease' : 'sendToMainRelease']({
-									accountId: account.accountId,
-									caption: quotedMessageBody.trim(),
-									url: publicUrl,
-									groupIds: account.groupGids
-								} as any)
+									const groupGids = groupsRelease.map(group => group.gid.replace('@g.us', ''))
+		
+									const groupGidsDivided = chunkByGroups(groupGids, accountIdsFromRelease?.accountIds?.length || 1)
+		
+									const accountIdsWithGroupsDivided = accountIdsFromRelease.accountIds.map((accountId: string, index: number) => ({
+										accountId,
+										groupGids: groupGidsDivided[index as number]
+									}))
+		
+									for (const account of accountIdsWithGroupsDivided) {
+										switch (accountIdsFromRelease.release) {
+											case "perfume":
+												await sendFlowApi.sendToPerfumeRelease({
+													accountId: account.accountId,
+													caption: quotedMessageBody.trim(),
+													url: publicUrl,
+													groupIds: account.groupGids
+												} as any)
+												
+												break
+											case "main":
+												await sendFlowApi.sendToMainRelease({
+													accountId: account.accountId,
+													caption: quotedMessageBody.trim(),
+													url: publicUrl,
+													groupIds: account.groupGids
+												} as any)
+												break
+											case "main2":
+												await sendFlowApi.sendToMain2Release({
+													accountId: account.accountId,
+													caption: quotedMessageBody.trim(),
+													url: publicUrl,
+													groupIds: account.groupGids
+												} as any)
+												break
+										}
+									}
 							}
 						}
 						

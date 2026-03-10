@@ -9,7 +9,7 @@ const sendflowApiAxios = axios.create({
   },
 });
 
-interface ReleaseGroupsResponse {
+export interface ReleaseGroupsResponse {
 	gid: string
 	id: string
 	inviteCode: string
@@ -36,6 +36,13 @@ class SendFlowApi {
 	
 	public async getMainReleaseGroup(): Promise<ReleaseGroupsResponse[]> {
 		const response = await sendflowApiAxios.get(`/releases/${process.env.SENDFLOW_MAIN_RELEASE_ID}/groups`)
+		const { data } = response
+		
+		return data as ReleaseGroupsResponse[]
+	}
+
+	public async getMain2ReleaseGroup(): Promise<ReleaseGroupsResponse[]> {
+		const response = await sendflowApiAxios.get(`/releases/${process.env.SENDFLOW_MAIN_2_RELEASE_ID}/groups`)
 		const { data } = response
 		
 		return data as ReleaseGroupsResponse[]
@@ -70,6 +77,17 @@ class SendFlowApi {
 		})
 	}
 
+	public async sendToMain2Release(data: SendToReleaseRequest): Promise<void> {
+		if (!data.accountId) return
+
+		await sendflowApiAxios.post(`/actions/send-image-message`, {
+			...data, 
+			releaseId: process.env.SENDFLOW_MAIN_2_RELEASE_ID,
+			accountId: data.accountId, 
+			chooseSpecificGroups: true, 
+		})
+	}
+
 	public async sendToPerfumeRelease(data: SendToReleaseRequest): Promise<void> {
 		if (!data.accountId) return
 
@@ -81,11 +99,13 @@ class SendFlowApi {
 		})
 	}
 
-	public async getAccountIdsFromRelease(releaseId: string): Promise<string[] | undefined> {
+	public async getAccountIdsFromRelease(releaseId: string): Promise<string[]> {
 		const response = await sendflowApiAxios.get(`/releases/${releaseId}`)
 		const { data } = response as { data: { accountIds: string[] } }
 
-		if (data?.accountIds) return data.accountIds		
+		if (data?.accountIds) return data.accountIds
+		
+		return []
 	}
 }
 
