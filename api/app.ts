@@ -19,7 +19,7 @@ const sendTextToEvolution = async (body: string, remoteJid: string) => {
 	};
 
 	await fetch(
-		`http://localhost:9000/message/sendText/${process.env.EVOLUTION_INSTANCE_NAME}`,
+		`${process.env.EVOLUTION_URL}/message/sendText/${process.env.EVOLUTION_INSTANCE_NAME}`,
 		{
 			method: 'POST',
 			headers,
@@ -33,6 +33,11 @@ const sendTextToEvolution = async (body: string, remoteJid: string) => {
 		}
 	);
 };
+
+app.get('/health', (req: Request, res: Response) => {
+	res.status(200).send('ok')
+})
+
 
 app.post('/receive-whatsapp', (req: Request, res: Response) => {
 	const { data } = req.body || {};
@@ -148,11 +153,6 @@ app.get('/', (req: Request, res: Response) => {
 		timestamp: new Date()
 	})
 });
-
-app.get('/health', (req, res) => {
-	res.status(200).send('ok')
-})
-
 
 app.listen(Number(PORT), '0.0.0.0', () => {
 	console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
