@@ -149,6 +149,10 @@ app.get('/', (req: Request, res: Response) => {
 	})
 });
 
+app.get('/health', (req, res) => {
+	res.status(200).send('ok')
+})
+
 
 app.listen(Number(PORT), '0.0.0.0', () => {
 	console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
