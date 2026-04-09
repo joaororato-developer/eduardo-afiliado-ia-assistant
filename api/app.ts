@@ -150,7 +150,7 @@ app.get('/', (req: Request, res: Response) => {
 });
 
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(Number(PORT), '0.0.0.0', () => {
 	console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
 });
 
