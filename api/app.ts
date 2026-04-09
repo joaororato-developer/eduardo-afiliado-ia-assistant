@@ -41,9 +41,9 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 	}
 
 	const { key } = data;
-	// if (key.fromMe) {
-	// 	return res.status(200).send();
-	// }
+	if (key.fromMe) {
+		return res.status(200).send();
+	}
 
 	const { remoteJid: remoteJidMessage } = key;
 
