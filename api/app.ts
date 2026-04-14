@@ -41,7 +41,7 @@ app.get('/health', (req: Request, res: Response) => {
 
 app.post('/receive-whatsapp', (req: Request, res: Response) => {
 	const { data } = req.body || {};
-	console.log({ data })
+
 	if (!data || !data.key) {
 		return res.status(200).send();
 	}
@@ -59,14 +59,13 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
 	const remoteJidGroupAllowed = [groupGeneral, groupMale, groupFemale];
 
-	console.log({ remoteJidMessage })
-
+	console.log({ remoteJidGroupAllowed, remoteJidMessage })
 	if (!remoteJidGroupAllowed.includes(remoteJidMessage)) {
 		return res.status(200).send();
 	}
 
 	setImmediate(async () => {
-		console.log("Iniciando processamento da mensagens")
+		console.log("Iniciando processamento da mensagens", { data })
 		try {
 			const { message } = data;
 			let { messageType } = data;
