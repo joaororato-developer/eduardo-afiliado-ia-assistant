@@ -61,13 +61,16 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
 	const remoteJidGroupAllowed = [groupGeneral, groupMale, groupFemale];
 
-	logger.info({ remoteJidGroupAllowed, remoteJidMessage })
+	logger.info(JSON.stringify({ remoteJidGroupAllowed, remoteJidMessage }))
+	logger.info(JSON.stringify({
+		isAllowedRemoteJid: !remoteJidGroupAllowed.includes(remoteJidMessage)
+	}))
 	if (!remoteJidGroupAllowed.includes(remoteJidMessage)) {
 		return res.status(200).send();
 	}
 
 	setImmediate(async () => {
-		logger.info({ data })
+		logger.info(JSON.stringify({ data }))
 		try {
 			const { message } = data;
 			let { messageType } = data;
@@ -77,7 +80,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 			if (data.contextInfo?.quotedMessage) {
 				messageType = `${messageType}ReplyMessage`;
 			}
-
+			logger.info(JSON.stringify({ messageType }))
 			if (!messageType) return;
 
 			let isModifyRequest = false;
@@ -128,6 +131,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 				}
 			}
 
+			logger.info("Chamando Gemini")
 			const model = genAI.getGenerativeModel({
 				model: "gemini-2.5-flash",
 			});
@@ -139,7 +143,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 			});
 
 			let outputMessage = result.response.text().trim();
-
+			logger.info(JSON.stringify({ outputMessage }))
 			await sendTextToEvolution(outputMessage, remoteJidMessage);
 
 		} catch (err) {
