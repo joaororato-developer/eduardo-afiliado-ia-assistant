@@ -4,7 +4,9 @@ import express, { Request, Response } from 'express';
 import { genAI } from './gemini';
 import { proto } from '@whiskeysockets/baileys'
 import { getPromptGeneral, getPromptMale, getPromptFemale, getPromptModifier } from "./prompts";
+import pino from 'pino';
 
+const logger = pino()
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -59,13 +61,13 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
 	const remoteJidGroupAllowed = [groupGeneral, groupMale, groupFemale];
 
-	console.log({ remoteJidGroupAllowed, remoteJidMessage })
+	logger.info({ remoteJidGroupAllowed, remoteJidMessage })
 	if (!remoteJidGroupAllowed.includes(remoteJidMessage)) {
 		return res.status(200).send();
 	}
 
 	setImmediate(async () => {
-		console.log("Iniciando processamento da mensagens", { data })
+		logger.info({ data })
 		try {
 			const { message } = data;
 			let { messageType } = data;
