@@ -2,11 +2,15 @@ import { GoogleGenAI } from "@google/genai";
 
 export const genAI = new GoogleGenAI({
     vertexai: true,
-    project: "promos-clube-geral",
+    project: process.env.GOOGLE_PROJECT_ID,
     location: "us-central1",
     apiVersion: 'v1',
     googleAuthOptions: {
-        keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        credentials: {
+            client_email: process.env.GOOGLE_CLIENT_EMAIL,
+            private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        },
+        projectId: process.env.GOOGLE_PROJECT_ID,
         scopes: ['https://www.googleapis.com/auth/cloud-platform']
     }
 });
