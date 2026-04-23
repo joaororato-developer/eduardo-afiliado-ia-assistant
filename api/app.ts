@@ -132,17 +132,12 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 			}
 
 			logger.info("Chamando Gemini")
-			const model = genAI.getGenerativeModel({
+			const result = await genAI.models.generateContent({
 				model: "gemini-2.5-flash",
+				contents: promptText
 			});
 
-			const result = await model.generateContent({
-				contents: [
-					{ role: 'user', parts: [{ text: promptText }] }
-				]
-			});
-
-			let outputMessage = result.response.text().trim();
+			let outputMessage = result.text?.trim() || '';
 			logger.info(JSON.stringify({ outputMessage }))
 			await sendTextToEvolution(outputMessage, remoteJidMessage);
 
