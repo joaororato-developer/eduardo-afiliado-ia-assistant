@@ -8,7 +8,7 @@ console.log('DEBUG AUTH:', {
 });
 
 export const genAI = new GoogleGenAI({
-    vertexAI: true, // DEVE SER MAIÚSCULO 'AI'
+    vertexai: true, // DEVE SER MAIÚSCULO 'AI'
     project: process.env.GOOGLE_PROJECT_ID,
     location: "us-central1",
     apiVersion: 'v1',
