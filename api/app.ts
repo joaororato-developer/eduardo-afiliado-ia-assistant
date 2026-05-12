@@ -141,6 +141,7 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 					contents: prompt.userContent,
 					config: {
 						systemInstruction: prompt.systemInstruction,
+						temperature: 1.5,
 						thinkingConfig: {
 							thinkingBudget: 0
 						}
