@@ -3,7 +3,7 @@ config()
 import express, { Request, Response } from 'express';
 import { genAI } from './gemini';
 import { proto } from '@whiskeysockets/baileys'
-import { getPromptGeneral, getPromptMale, getPromptFemale, getPromptModifier } from "./prompts";
+import { getPromptGeneral, getPromptMale, getPromptFemale, getPromptModifier, PromptParts } from "./prompts";
 import pino from 'pino';
 
 const logger = pino()
@@ -28,7 +28,7 @@ const sendTextToEvolution = async (body: string, remoteJid: string) => {
 			body: JSON.stringify({
 				number: remoteJid,
 				options: {
-					delay: 1000,
+					delay: 300,
 				},
 				text: body
 			})
@@ -114,28 +114,44 @@ app.post('/receive-whatsapp', (req: Request, res: Response) => {
 
 			if (!messageBody) return;
 
-			let promptText = '';
+			let prompt: PromptParts = { systemInstruction: '', userContent: '' };
 			if (isModifyRequest) {
-				promptText = getPromptModifier(quotedMessageBody, messageBody);
+				prompt = getPromptModifier(quotedMessageBody, messageBody);
 			} else {
 				switch (remoteJidMessage) {
 					case groupGeneral:
-						promptText = getPromptGeneral(messageBody);
+						prompt = getPromptGeneral(messageBody);
 						break;
 					case groupMale:
-						promptText = getPromptMale(messageBody);
+						prompt = getPromptMale(messageBody);
 						break;
 					case groupFemale:
-						promptText = getPromptFemale(messageBody);
+						prompt = getPromptFemale(messageBody);
 						break;
 				}
 			}
 
 			logger.info("Chamando Gemini")
-			const result = await genAI.models.generateContent({
-				model: "gemini-2.5-flash",
-				contents: promptText
-			});
+			const startTime = Date.now();
+
+			const timeoutMs = 30000;
+			const result = await Promise.race([
+				genAI.models.generateContent({
+					model: "gemini-2.5-flash",
+					contents: prompt.userContent,
+					config: {
+						systemInstruction: prompt.systemInstruction,
+						thinkingConfig: {
+							thinkingBudget: 0
+						}
+					}
+				}),
+				new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new Error(`Gemini timeout após ${timeoutMs / 1000}s`)), timeoutMs)
+				)
+			]);
+
+			logger.info(`Gemini respondeu em ${Date.now() - startTime}ms`);
 
 			let outputMessage = result.text?.trim() || '';
 			logger.info(JSON.stringify({ outputMessage }))

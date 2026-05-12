@@ -1,6 +1,12 @@
-export const getPromptGeneral = (message: string, isMale: boolean = false) => {
+export interface PromptParts {
+  systemInstruction: string;
+  userContent: string;
+}
+
+export const getPromptGeneral = (message: string, isMale: boolean = false): PromptParts => {
    const groupContext = isMale ? "pessoas (apenas homens)" : "pessoas (homens e mulheres misturados)";
-   return `FUNÇÃO: Você atua como um INFLUENCER DE PROMOÇÕES enviando recomendações no seu grupo de WhatsApp especializado em ofertas de E-commerce. 
+   return {
+     systemInstruction: `FUNÇÃO: Você atua como um INFLUENCER DE PROMOÇÕES enviando recomendações no seu grupo de WhatsApp especializado em ofertas de E-commerce. 
 INFORMAÇÃO IMPORTANTE: A mensagem será lida por milhares de ${groupContext} no seu grupo. Eles te seguem pelas suas dicas! Seja autêntico, informal e aja com naturalidade humana em suas descrições no título.
 Sua ÚNICA tarefa é extrair os dados da mensagem não estruturada abaixo e reformatá-la seguindo EXATAMENTE o esqueleto rígido definido.
 IMPORTANTE: A sua saída deve seguir ESTRITAMENTE a física de linhas definida. Você está PROIBIDO de inserir linhas vazias adicionais ou textos explicativos.
@@ -127,16 +133,18 @@ Obrigatoriamente confira antes de entregar a resposta:
 3) Caso existam vários cupons na entrada, o último é separado por " ou " (ex: *C1*, *C2* ou *C3*)?
 4) Há apenas UMA quebra de linha entre Preço e Cupom? (Deve ser bloco colado).
 
-ENTRADA NÃO ESTRUTURADA:
-${message}`
+ENTRADA NÃO ESTRUTURADA:`,
+     userContent: message
+   }
 }
 
-export const getPromptMale = (message: string) => {
+export const getPromptMale = (message: string): PromptParts => {
    return getPromptGeneral(message, true);
 }
 
-export const getPromptFemale = (message: string) => {
-   return `FUNÇÃO: Você atua como uma INFLUENCER DIGITAL DE ACHADINHOS enviando dicas valiosas no WhatsApp, focada em consumo VIP FEMININO (beleza, moda, casa).
+export const getPromptFemale = (message: string): PromptParts => {
+   return {
+     systemInstruction: `FUNÇÃO: Você atua como uma INFLUENCER DIGITAL DE ACHADINHOS enviando dicas valiosas no WhatsApp, focada em consumo VIP FEMININO (beleza, moda, casa).
 INFORMAÇÃO IMPORTANTE: A mensagem será lida por milhares de MULHERES no seu grupo VIP. Elas te seguem por causa dos seus toques! Fale de mulher para mulher, com naturalidade humana, emoção e uma escrita leve.
 Sua ÚNICA tarefa é extrair os dados da mensagem não estruturada abaixo e reformatá-la seguindo EXATAMENTE o esqueleto rígido definido.
 IMPORTANTE: A sua saída deve seguir ESTRITAMENTE a física de linhas definida. Você está PROIBIDO de inserir linhas vazias adicionais ou textos explicativos.
@@ -252,23 +260,25 @@ Disponível na Amazon!!
 3. Excluí DE FATO o link ("https://...") ao enviar o resultado? Nenhum link deve vazar na sua entrega.
 4. Não há \`\`\` text \`\`\` no inicio da mensagem?
 
-ENTRADA NÃO ESTRUTURADA PARA FORMATAR AGORA:
-${message}`
+ENTRADA NÃO ESTRUTURADA PARA FORMATAR AGORA:`,
+     userContent: message
+   }
 }
 
-export const getPromptModifier = (originalMessage: string, userRequest: string) => {
-   return `FUNÇÃO: Você atua aplicando correções rigorosas e pontuais em anúncios E-Commerce de WhatsApp já formatados pelo motor principal.
+export const getPromptModifier = (originalMessage: string, userRequest: string): PromptParts => {
+   return {
+     systemInstruction: `FUNÇÃO: Você atua aplicando correções rigorosas e pontuais em anúncios E-Commerce de WhatsApp já formatados pelo motor principal.
 O humano enviou o texto atual e comandou uma correção específica (exemplo: "Aumente o preço para 70" ou "Tire o termo X").
 
 ### DIRETRIZES
 1. Siga A RISCA EXATAMENTE o que foi pedido no [Pedido do Humano].
 2. MANTENHA TODO O RESTANTE DA ESTRUTURA INTACTA (A física dos parágrafos duplos e colados: manter *Códigos* e emojis 🎟️, 🔥🔥).
 3. Não adicione textos extras. Apenas devolva a Mensagem Modificada pronta pra WhatsApp, sem \`\`\` de bloco de código no início ou final.
-4. Jamais insira links no texto final formatado.
-
-Mensagem Atual:
+4. Jamais insira links no texto final formatado.`,
+     userContent: `Mensagem Atual:
 ${originalMessage}
 
 Pedido de Alteração do Humano:
 ${userRequest}`
+   }
 }
